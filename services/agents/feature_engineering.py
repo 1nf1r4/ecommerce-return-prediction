@@ -13,14 +13,19 @@ class FeatureEngineeringAgent:
     Purpose: Create derived features from raw/preprocessed inputs
     """
 
-    def __init__(self):
+    def __init__(self, scaler_path=None, encoder_path=None):
         self.required_columns = [
             "Product_Price", "Order_Quantity", "User_Age", 
             "User_Location", "Discount_Applied", "Order_Date"
         ]
-        # Load the scaler object
-        with open('path/to/scaler.pkl', 'rb') as f:
-            self.scaler = pickle.load(f)
+        self.scaler = None
+        self.encoder = None
+        if scaler_path:
+            with open(scaler_path, 'rb') as f:
+                self.scaler = pickle.load(f)
+        if encoder_path:
+            with open(encoder_path, 'rb') as f:
+                self.encoder = pickle.load(f)
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -54,13 +59,19 @@ class FeatureEngineeringAgent:
         if df["Order_Date"].isnull().any():
             logger.warning("Some Order_Date values could not be parsed and are set as NaT.")
 
-        # 3. Encode User Location (flexible)
-        location_map = {"Urban": 1, "Rural": 0, "Suburban": 2}
-        df["User_Location_Num"] = df["User_Location"].map(location_map)
-        # Assign -1 for unknown locations
-        df["User_Location_Num"] = df["User_Location_Num"].fillna(-1)
-        if (df["User_Location_Num"] == -1).any():
-            logger.warning("Some User_Location values are unknown and encoded as -1.")
+        # 3. Encode User Location using fitted encoder if available
+        if self.encoder:
+            try:
+                df["User_Location_Num"] = self.encoder.transform(df[["User_Location"]])
+            except Exception as e:
+                logger.warning(f"Encoding User_Location failed: {e}")
+                df["User_Location_Num"] = -1
+        else:
+            location_map = {"Urban": 1, "Rural": 0, "Suburban": 2}
+            df["User_Location_Num"] = df["User_Location"].map(location_map)
+            df["User_Location_Num"] = df["User_Location_Num"].fillna(-1)
+            if (df["User_Location_Num"] == -1).any():
+                logger.warning("Some User_Location values are unknown and encoded as -1.")
 
         # 4. Discount transformations (robust)
         df["Discount_Amount"] = df["Product_Price"] * (df["Discount_Applied"].fillna(0) / 100)
@@ -69,6 +80,14 @@ class FeatureEngineeringAgent:
         invalid_discount = (df["Discount_Applied"] < 0) | (df["Discount_Applied"] > 100)
         if invalid_discount.any():
             logger.warning("Some Discount_Applied values are outside [0, 100].")
+
+        # 5. Apply fitted scaler if available (for numeric columns)
+        if self.scaler:
+            num_cols = ["Product_Price", "Order_Quantity", "Discount_Applied", "Total_Order_Value", "Discount_Amount", "Effective_Price", "User_Age"]
+            try:
+                df[num_cols] = self.scaler.transform(df[num_cols])
+            except Exception as e:
+                logger.warning(f"Scaling failed: {e}")
 
         logger.info("Feature engineering completed successfully.")
         return df
