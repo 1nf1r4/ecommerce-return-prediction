@@ -2,6 +2,7 @@ import pandas as pd
 import logging
 from typing import Dict, Any
 from datetime import datetime
+import pickle
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -17,6 +18,9 @@ class FeatureEngineeringAgent:
             "Product_Price", "Order_Quantity", "User_Age", 
             "User_Location", "Discount_Applied", "Order_Date"
         ]
+        # Load the scaler object
+        with open('path/to/scaler.pkl', 'rb') as f:
+            self.scaler = pickle.load(f)
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
