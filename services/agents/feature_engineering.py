@@ -8,6 +8,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FeatureEngineeringAgent:
+    def to_inference(self, df: pd.DataFrame, inference_agent) -> dict:
+        """
+        Prepare engineered features for inference and pass to ModelInferenceAgent.
+        Args:
+            df: DataFrame after feature engineering (output of self.transform)
+            inference_agent: An instance of ModelInferenceAgent (from model_inference.py)
+        Returns:
+            dict: Prediction result from the inference agent
+        Notes:
+            The output DataFrame columns will be aligned to match the preprocessed dataset used for model training.
+        """
+        # Define the expected feature columns for inference (from preprocessed data)
+        expected_columns = [
+            'Product_Category', 'Product_Price', 'Order_Quantity', 'Return_Reason',
+            'User_Age', 'User_Gender', 'Payment_Method', 'Shipping_Method',
+            'Discount_Applied', 'Return_Flag_fixed', 'Days_to_Return_filled2',
+            'Total_Order_Value', 'Order_Year', 'Order_Month', 'Order_Weekday', 'User_Location_Num'
+        ]
+        # If any expected columns are missing, add them with default values (0 or NaN)
+        for col in expected_columns:
+            if col not in df.columns:
+                df[col] = 0
+        # Reorder columns to match expected order
+        df = df[expected_columns]
+        return inference_agent.predict_single(df)
     """
     Feature Engineering Agent
     Purpose: Create derived features from raw/preprocessed inputs
@@ -92,18 +117,4 @@ class FeatureEngineeringAgent:
         logger.info("Feature engineering completed successfully.")
         return df
 
-# Example usage
-if __name__ == "__main__":
-    # Sample preprocessed data
-    sample_data = pd.DataFrame([{
-        "Product_Price": 1500,
-        "Order_Quantity": 1,
-        "User_Age": 24,
-        "User_Location": "Urban",
-        "Discount_Applied": 2,
-        "Order_Date": "2024-01-15"
-    }])
 
-    agent = FeatureEngineeringAgent()
-    result_df = agent.transform(sample_data)
-    print(result_df)
