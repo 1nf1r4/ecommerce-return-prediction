@@ -1,3 +1,25 @@
+if __name__ == "__main__":
+    import pandas as pd
+    from agents.feature_engineering import FeatureEngineeringAgent
+    from agents.model_inference import ModelInferenceAgent
+
+    # Load preprocessed data
+    data_path = "data/processed/ecommerce_returns_synthetic_data_preprocessed.csv"
+    df = pd.read_csv(data_path)
+
+    # Initialize agents
+    fe_agent = FeatureEngineeringAgent()
+    inference_agent = ModelInferenceAgent()
+
+    # Run feature engineering
+    features = fe_agent.transform(df)
+
+    # Run batch prediction directly using the model
+    model = getattr(inference_agent, 'primary_model', None) or getattr(inference_agent, 'fallback_model', None)
+    if hasattr(model, 'feature_names_in_'):
+        features = features[list(model.feature_names_in_)]
+    predictions = model.predict(features)
+    print(predictions)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging

@@ -17,21 +17,18 @@ class FeatureEngineeringAgent:
         Returns:
             dict: Prediction result from the inference agent
         Notes:
-            The output DataFrame columns will be aligned to match the preprocessed dataset used for model training.
+            The output DataFrame columns will be aligned to match the model's expected features (order and name).
         """
-        # Define the expected feature columns for inference (from preprocessed data)
-        expected_columns = [
-            'Product_Category', 'Product_Price', 'Order_Quantity', 'Return_Reason',
-            'User_Age', 'User_Gender', 'Payment_Method', 'Shipping_Method',
-            'Discount_Applied', 'Return_Flag_fixed', 'Days_to_Return_filled2',
-            'Total_Order_Value', 'Order_Year', 'Order_Month', 'Order_Weekday', 'User_Location_Num'
-        ]
-        # If any expected columns are missing, add them with default values (0 or NaN)
-        for col in expected_columns:
-            if col not in df.columns:
-                df[col] = 0
-        # Reorder columns to match expected order
-        df = df[expected_columns]
+        # Get expected columns from the model (primary or fallback)
+        model = getattr(inference_agent, 'primary_model', None) or getattr(inference_agent, 'fallback_model', None)
+        if hasattr(model, 'feature_names_in_'):
+            expected_columns = list(model.feature_names_in_)
+            # Add missing columns with default value 0
+            for col in expected_columns:
+                if col not in df.columns:
+                    df[col] = 0
+            # Only keep expected columns, in order
+            df = df[expected_columns]
         return inference_agent.predict_single(df)
     """
     Feature Engineering Agent
@@ -40,9 +37,8 @@ class FeatureEngineeringAgent:
 
     def __init__(self, scaler_path=None, encoder_path=None):
         self.required_columns = [
-            "Product_Price", "Order_Quantity", "User_Age", 
-            "User_Location", "Discount_Applied", "Order_Date"
-        ]
+            "Product_Price", "Order_Quantity", "User_Age",
+            "Discount_Applied", "Order_Year","Order_Month","Order_Weekday"       ]
         self.scaler = None
         self.encoder = None
         if scaler_path:
@@ -75,28 +71,23 @@ class FeatureEngineeringAgent:
         # 1. Total Order Value
         df["Total_Order_Value"] = df["Product_Price"] * df["Order_Quantity"]
 
-        # 2. Temporal Features
-        df["Order_Date"] = pd.to_datetime(df["Order_Date"], errors="coerce")
-        df["Order_Year"] = df["Order_Date"].dt.year
-        df["Order_Month"] = df["Order_Date"].dt.month
-        df["Order_Weekday"] = df["Order_Date"].dt.weekday
-        # Warn if any dates could not be parsed
-        if df["Order_Date"].isnull().any():
-            logger.warning("Some Order_Date values could not be parsed and are set as NaT.")
+        # 2. Temporal Features (skipped: Order_Date not present in preprocessed data)
 
-        # 3. Encode User Location using fitted encoder if available
-        if self.encoder:
-            try:
-                df["User_Location_Num"] = self.encoder.transform(df[["User_Location"]])
-            except Exception as e:
-                logger.warning(f"Encoding User_Location failed: {e}")
-                df["User_Location_Num"] = -1
-        else:
-            location_map = {"Urban": 1, "Rural": 0, "Suburban": 2}
-            df["User_Location_Num"] = df["User_Location"].map(location_map)
-            df["User_Location_Num"] = df["User_Location_Num"].fillna(-1)
-            if (df["User_Location_Num"] == -1).any():
-                logger.warning("Some User_Location values are unknown and encoded as -1.")
+        # 3. Encode User Location using fitted encoder if available, only if User_Location column exists
+        if "User_Location" in df.columns:
+            if self.encoder:
+                try:
+                    df["User_Location_Num"] = self.encoder.transform(df[["User_Location"]])
+                except Exception as e:
+                    logger.warning(f"Encoding User_Location failed: {e}")
+                    df["User_Location_Num"] = -1
+            else:
+                location_map = {"Urban": 1, "Rural": 0, "Suburban": 2}
+                df["User_Location_Num"] = df["User_Location"].map(location_map)
+                df["User_Location_Num"] = df["User_Location_Num"].fillna(-1)
+                if (df["User_Location_Num"] == -1).any():
+                    logger.warning("Some User_Location values are unknown and encoded as -1.")
+        # If User_Location is not present, assume User_Location_Num is already present in preprocessed data
 
         # 4. Discount transformations (robust)
         df["Discount_Amount"] = df["Product_Price"] * (df["Discount_Applied"].fillna(0) / 100)
