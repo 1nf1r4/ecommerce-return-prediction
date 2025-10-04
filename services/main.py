@@ -25,9 +25,19 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+import os
+cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173").split(",")
+
+# Add common patterns for production
+if any("vercel.app" in origin for origin in cors_origins):
+    cors_origins.extend([
+        "https://*.vercel.app",
+        "https://vercel.app"
+    ])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
+    allow_origins=cors_origins + [
         "http://localhost:3000",  # React dev server
         "http://localhost:5173",  # Vite dev server
         "http://127.0.0.1:3000",

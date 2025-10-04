@@ -1,8 +1,441 @@
 """
-Analytics API Router
-Purpose: Expose Business Intelligence Agent functionality via REST API
-Endpoints for business analytics, reporting, and dashboard data
+Analytics API Endpoints
+Purpose: Handle analytics and dashboard data requests for authenticated users
 """
+
+from fastapi import APIRouter, HTTPException, Depends, Query
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional, Any
+import logging
+from datetime import datetime, timedelta
+
+from utils.supabase_service import get_supabase_service, SupabaseService
+from api.prediction import get_current_user
+
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# Create router
+router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+# Response models
+class DashboardSummaryResponse(BaseModel):
+    """Response model for dashboard summary"""
+    success: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    generated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+class PredictionHistoryResponse(BaseModel):
+    """Response model for prediction history"""
+    success: bool
+    predictions: List[Dict[str, Any]] = []
+    total_count: int = 0
+    page: int = 1
+    page_size: int = 25
+    error: Optional[str] = None
+
+class UserAnalyticsResponse(BaseModel):
+    """Response model for user analytics"""
+    success: bool
+    analytics: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    period_days: int = 30
+
+@router.get("/dashboard", response_model=DashboardSummaryResponse)
+async def get_dashboard_summary(
+    days: int = Query(default=30, ge=1, le=365, description="Number of days to include in summary"),
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+) -> DashboardSummaryResponse:
+    """
+    Get dashboard summary for authenticated user
+    
+    Args:
+        days: Number of days to include in summary
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        Dashboard summary data
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return DashboardSummaryResponse(
+                success=False,
+                error="Database service not available"
+            )
+        
+        # Get prediction summary
+        prediction_summary = await db_service.get_predictions_summary(user_id, days)
+        
+        # Get recent predictions for trends
+        recent_predictions = await db_service.get_predictions(
+            user_id=user_id,
+            limit=100,
+            start_date=(datetime.now() - timedelta(days=days)).isoformat()
+        )
+        
+        # Calculate trends
+        if len(recent_predictions) >= 2:
+            # Split into two halves to calculate trend
+            mid_point = len(recent_predictions) // 2
+            recent_half = recent_predictions[:mid_point]
+            older_half = recent_predictions[mid_point:]
+            
+            recent_avg = sum(p.get('predicted_return_probability', 0) for p in recent_half) / len(recent_half)
+            older_avg = sum(p.get('predicted_return_probability', 0) for p in older_half) / len(older_half)
+            
+            risk_trend = "increasing" if recent_avg > older_avg else "decreasing" if recent_avg < older_avg else "stable"
+        else:
+            risk_trend = "insufficient_data"
+        
+        # Calculate daily prediction counts
+        daily_counts = {}
+        for prediction in recent_predictions:
+            date_str = prediction.get('created_at', '')[:10]  # Get date part
+            daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
+        
+        # Get user preferences
+        user_preferences = await db_service.get_user_preferences(user_id)
+        
+        dashboard_data = {
+            'summary': prediction_summary,
+            'trends': {
+                'risk_trend': risk_trend,
+                'daily_prediction_counts': daily_counts,
+                'total_predictions_trend': len(recent_predictions)
+            },
+            'user_preferences': user_preferences,
+            'period_days': days
+        }
+        
+        return DashboardSummaryResponse(
+            success=True,
+            data=dashboard_data
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting dashboard summary: {str(e)}")
+        return DashboardSummaryResponse(
+            success=False,
+            error=str(e)
+        )
+
+@router.get("/predictions", response_model=PredictionHistoryResponse)
+async def get_prediction_history(
+    page: int = Query(default=1, ge=1, description="Page number"),
+    page_size: int = Query(default=25, ge=1, le=100, description="Number of items per page"),
+    risk_level: Optional[str] = Query(default=None, description="Filter by risk level"),
+    start_date: Optional[str] = Query(default=None, description="Start date filter (ISO format)"),
+    end_date: Optional[str] = Query(default=None, description="End date filter (ISO format)"),
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+) -> PredictionHistoryResponse:
+    """
+    Get prediction history for authenticated user
+    
+    Args:
+        page: Page number
+        page_size: Number of items per page
+        risk_level: Optional risk level filter
+        start_date: Optional start date filter
+        end_date: Optional end date filter
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        Paginated prediction history
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return PredictionHistoryResponse(
+                success=False,
+                error="Database service not available"
+            )
+        
+        # Calculate offset for pagination
+        offset = (page - 1) * page_size
+        
+        # Get predictions with filters
+        predictions = await db_service.get_predictions(
+            user_id=user_id,
+            limit=page_size,
+            risk_level=risk_level,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        # For total count, we'd need a separate query in a real implementation
+        # For now, we'll use the returned count as an approximation
+        total_count = len(predictions)
+        
+        return PredictionHistoryResponse(
+            success=True,
+            predictions=predictions,
+            total_count=total_count,
+            page=page,
+            page_size=page_size
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting prediction history: {str(e)}")
+        return PredictionHistoryResponse(
+            success=False,
+            error=str(e)
+        )
+
+@router.get("/user-analytics", response_model=UserAnalyticsResponse)
+async def get_user_analytics(
+    days: int = Query(default=30, ge=1, le=365, description="Number of days to analyze"),
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+) -> UserAnalyticsResponse:
+    """
+    Get detailed analytics for authenticated user
+    
+    Args:
+        days: Number of days to analyze
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        User analytics data
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return UserAnalyticsResponse(
+                success=False,
+                error="Database service not available",
+                period_days=days
+            )
+        
+        # Get comprehensive analytics
+        analytics = await db_service.get_user_analytics(user_id, days)
+        
+        return UserAnalyticsResponse(
+            success=True,
+            analytics=analytics,
+            period_days=days
+        )
+        
+    except Exception as e:
+        logger.error(f"Error getting user analytics: {str(e)}")
+        return UserAnalyticsResponse(
+            success=False,
+            error=str(e),
+            period_days=days
+        )
+
+@router.get("/batch-jobs")
+async def get_batch_jobs(
+    status: Optional[str] = Query(default=None, description="Filter by status"),
+    limit: int = Query(default=20, ge=1, le=100, description="Number of jobs to return"),
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+):
+    """
+    Get batch jobs for authenticated user
+    
+    Args:
+        status: Optional status filter
+        limit: Number of jobs to return
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        List of batch jobs
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return {
+                "success": False,
+                "error": "Database service not available",
+                "jobs": []
+            }
+        
+        # Get user's batch jobs
+        jobs = await db_service.get_user_batch_jobs(user_id, limit, status)
+        
+        return {
+            "success": True,
+            "jobs": jobs,
+            "total_count": len(jobs)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting batch jobs: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "jobs": []
+        }
+
+@router.put("/preferences")
+async def update_user_preferences(
+    preferences: Dict[str, Any],
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+):
+    """
+    Update user preferences
+    
+    Args:
+        preferences: Preferences to update
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        Success status
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return {
+                "success": False,
+                "error": "Database service not available"
+            }
+        
+        # Update preferences
+        success = await db_service.update_user_preferences(user_id, preferences)
+        
+        if success:
+            return {
+                "success": True,
+                "message": "Preferences updated successfully"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to update preferences"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error updating user preferences: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.get("/profile")
+async def get_user_profile(
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+):
+    """
+    Get user profile information
+    
+    Args:
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        User profile data
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return {
+                "success": False,
+                "error": "Database service not available",
+                "profile": None
+            }
+        
+        # Get user profile
+        profile = await db_service.get_user_profile(user_id)
+        
+        return {
+            "success": True,
+            "profile": profile,
+            "auth_user": current_user
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user profile: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e),
+            "profile": None
+        }
+
+@router.put("/profile")
+async def update_user_profile(
+    profile_data: Dict[str, Any],
+    db_service: SupabaseService = Depends(get_supabase_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+):
+    """
+    Update user profile information
+    
+    Args:
+        profile_data: Profile data to update
+        db_service: Supabase service instance
+        current_user: Current authenticated user
+        
+    Returns:
+        Updated profile data
+    """
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    try:
+        user_id = current_user['id']
+        
+        if not db_service.is_enabled():
+            return {
+                "success": False,
+                "error": "Database service not available"
+            }
+        
+        # Update user profile
+        updated_profile = await db_service.create_user_profile(user_id, profile_data)
+        
+        if updated_profile:
+            return {
+                "success": True,
+                "profile": updated_profile,
+                "message": "Profile updated successfully"
+            }
+        else:
+            return {
+                "success": False,
+                "error": "Failed to update profile"
+            }
+        
+    except Exception as e:
+        logger.error(f"Error updating user profile: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 from fastapi import APIRouter, HTTPException, Query
 from typing import Dict, List, Optional, Any
@@ -180,8 +613,12 @@ async def get_recent_predictions(limit: int = Query(10, description="Number of r
                 "message": "Database not available"
             }
         
-        # Get recent predictions
-        predictions = await supabase_service.get_predictions(limit=limit)
+        # Get recent predictions (all predictions regardless of user)
+        predictions = await supabase_service.get_predictions(
+            limit=limit, 
+            user_id=None,
+            include_anonymous=True
+        )
         
         # Transform to match frontend format
         formatted_predictions = []
@@ -585,10 +1022,12 @@ async def _get_predictions_by_time(time_period: str) -> List[Dict[str, Any]]:
     else:
         cutoff = now - timedelta(days=30)  # Default
     
-    # Get predictions from Supabase
+    # Get ALL predictions from Supabase (both anonymous and user predictions)
     predictions = await supabase_service.get_predictions(
+        user_id=None,  # Don't filter by specific user
         start_date=cutoff.isoformat(),
-        limit=10000
+        limit=10000,
+        include_anonymous=True  # Include all predictions
     )
     
     # Transform database format to match expected format

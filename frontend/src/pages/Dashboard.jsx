@@ -1,12 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../hooks/useAuth";
 import DashboardHeader from "../components/layout/DashboardHeader";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import apiService from "../services/apiService";
@@ -60,8 +55,6 @@ const Dashboard = () => {
     userGender: "",
     userLocation: "",
     paymentMethod: "",
-    shippingMethod: "Standard",
-    discountApplied: "0",
   });
 
   // Batch processing state
@@ -114,23 +107,25 @@ const Dashboard = () => {
 
         // Set analytics data for charts
         // Transform riskDist for pie chart
-        const riskDistForChart = riskDist ? [
-          { 
-            name: "Low Risk", 
-            value: riskDist.low_risk?.percentage || 0, 
-            color: "#10b981" 
-          },
-          { 
-            name: "Medium Risk", 
-            value: riskDist.medium_risk?.percentage || 0, 
-            color: "#f59e0b" 
-          },
-          { 
-            name: "High Risk", 
-            value: riskDist.high_risk?.percentage || 0, 
-            color: "#ef4444" 
-          },
-        ] : null;
+        const riskDistForChart = riskDist
+          ? [
+              {
+                name: "Low Risk",
+                value: riskDist.low_risk?.percentage || 0,
+                color: "#10b981",
+              },
+              {
+                name: "Medium Risk",
+                value: riskDist.medium_risk?.percentage || 0,
+                color: "#f59e0b",
+              },
+              {
+                name: "High Risk",
+                value: riskDist.high_risk?.percentage || 0,
+                color: "#ef4444",
+              },
+            ]
+          : null;
 
         setAnalyticsData((prev) => ({
           ...prev,
@@ -175,71 +170,73 @@ const Dashboard = () => {
   }, [checkBackendHealth]);
 
   // Handle quick prediction
-  const handleQuickPredictionSubmit = useCallback(async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setPredictionResult(null);
+  const handleQuickPredictionSubmit = useCallback(
+    async (e) => {
+      e.preventDefault();
+      setLoading(true);
+      setPredictionResult(null);
 
-    try {
-      const orderData = apiService.transformOrderData(quickPrediction);
-      const response = await apiService.processOrder(orderData);
+      try {
+        const orderData = apiService.transformOrderData(quickPrediction);
+        const response = await apiService.processOrder(orderData);
 
-      if (response.success) {
-        const probability = Math.round(
-          response.prediction.return_probability * 100
-        );
-        const riskLevel = response.risk_level;
+        if (response.success) {
+          const prediction = response.prediction;
+          const probability = Math.round(prediction.return_probability * 100);
+          const riskLevel = prediction.risk_level;
 
-        setPredictionResult({
-          probability,
-          riskLevel,
-          confidence: Math.round(response.confidence * 100),
-          recommendations: response.recommendations || [],
-          factors: [
-            {
-              factor: "Product Category",
-              impact: "Medium",
-              value: quickPrediction.productCategory,
-            },
-            {
-              factor: "Price Range",
-              impact: "High",
-              value: `$${quickPrediction.productPrice}`,
-            },
-            {
-              factor: "User Location",
-              impact: "Low",
-              value: quickPrediction.userLocation,
-            },
-          ],
-        });
+          setPredictionResult({
+            probability,
+            riskLevel,
+            confidence: Math.round(prediction.confidence_score * 100),
+            recommendations: response.recommendations || [],
+            factors: [
+              {
+                factor: "Product Category",
+                impact: "Medium",
+                value: quickPrediction.productCategory,
+              },
+              {
+                factor: "Price Range",
+                impact: "High",
+                value: `$${quickPrediction.productPrice}`,
+              },
+              {
+                factor: "User Location",
+                impact: "Low",
+                value: quickPrediction.userLocation,
+              },
+            ],
+          });
 
-        // Add to recent predictions
-        const newPrediction = {
-          timestamp: new Date().toISOString(),
-          category: quickPrediction.productCategory,
-          orderValue:
-            parseFloat(quickPrediction.productPrice) *
-            parseInt(quickPrediction.orderQuantity),
-          returnProbability: response.prediction.return_probability,
-          riskLevel: riskLevel,
-          status: "Completed",
-        };
+          // Add to recent predictions
+          const newPrediction = {
+            timestamp: new Date().toISOString(),
+            category: quickPrediction.productCategory,
+            orderValue:
+              parseFloat(quickPrediction.productPrice) *
+              parseInt(quickPrediction.orderQuantity),
+            returnProbability: response.prediction.return_probability,
+            riskLevel: riskLevel,
+            status: "Completed",
+          };
 
-        setRecentPredictions((prev) => [newPrediction, ...prev.slice(0, 9)]);
-        
-        // Reload analytics data and recent predictions to reflect the new prediction
-        await loadAnalyticsData();
-        await loadRecentPredictions();
-      } else {
-        throw new Error(response.error || "Prediction failed");
+          setRecentPredictions((prev) => [newPrediction, ...prev.slice(0, 9)]);
+
+          // Reload analytics data and recent predictions to reflect the new prediction
+          await loadAnalyticsData();
+          await loadRecentPredictions();
+        } else {
+          throw new Error(response.error || "Prediction failed");
+        }
+      } catch (error) {
+        console.error("Prediction failed:", error);
+      } finally {
+        setLoading(false);
       }
-    } catch (error) {
-      console.error("Prediction failed:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [quickPrediction, loadAnalyticsData, loadRecentPredictions]);
+    },
+    [quickPrediction, loadAnalyticsData, loadRecentPredictions]
+  );
 
   const handleInputChange = (e) => {
     setQuickPrediction({
@@ -327,17 +324,21 @@ const Dashboard = () => {
 
   // Tab configuration
   const tabs = [
-    { id: "overview", label: "Overview", icon: <HomeIcon className="h-4 w-4" /> },
+    {
+      id: "overview",
+      label: "Overview",
+      icon: <HomeIcon className="h-4 w-4" />,
+    },
     {
       id: "prediction",
       label: "Single Prediction",
       icon: <CubeIcon className="h-4 w-4" />,
     },
-    // {
-    //   id: "batch",
-    //   label: "Batch Processing",
-    //   icon: <DocumentChartBarIcon className="h-4 w-4" />,
-    // },
+    {
+      id: "batch",
+      label: "Batch Processing",
+      icon: <DocumentChartBarIcon className="h-4 w-4" />,
+    },
     {
       id: "analytics",
       label: "Analytics",
@@ -358,9 +359,12 @@ const Dashboard = () => {
                 <span className="h-2 w-2 rounded-full bg-white animate-ping"></span>
               </div>
               <div>
-                <AlertTitle className="text-amber-900 font-semibold">Backend Service Unavailable</AlertTitle>
+                <AlertTitle className="text-amber-900 font-semibold">
+                  Backend Service Unavailable
+                </AlertTitle>
                 <AlertDescription className="text-amber-700">
-                  The prediction service is currently unavailable. Some features may not work.
+                  The prediction service is currently unavailable. Some features
+                  may not work.
                 </AlertDescription>
               </div>
             </div>
@@ -378,8 +382,18 @@ const Dashboard = () => {
                   Total Orders
                 </CardTitle>
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg">
-                  <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  <svg
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"
+                    />
                   </svg>
                 </div>
               </div>
@@ -404,8 +418,18 @@ const Dashboard = () => {
                   Predicted Returns
                 </CardTitle>
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-red-500 to-orange-600 flex items-center justify-center shadow-lg">
-                  <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  <svg
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    />
                   </svg>
                 </div>
               </div>
@@ -430,8 +454,18 @@ const Dashboard = () => {
                   Return Rate
                 </CardTitle>
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center shadow-lg">
-                  <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  <svg
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                    />
                   </svg>
                 </div>
               </div>
@@ -456,8 +490,18 @@ const Dashboard = () => {
                   Revenue Saved
                 </CardTitle>
                 <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center shadow-lg">
-                  <svg className="h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg
+                    className="h-5 w-5 text-white"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
                   </svg>
                 </div>
               </div>
@@ -491,10 +535,7 @@ const Dashboard = () => {
                 <h2 className="text-2xl font-bold text-gray-900">
                   Dashboard Overview
                 </h2>
-                <ExportButton
-                  data={recentPredictions}
-                  filename="predictions"
-                />
+                <ExportButton data={recentPredictions} filename="predictions" />
               </div>
 
               {recentPredictions.length > 0 ? (
@@ -543,7 +584,7 @@ const Dashboard = () => {
                           <option value="Electronics">Electronics</option>
                           <option value="Clothing">Clothing</option>
                           <option value="Books">Books</option>
-                          <option value="Home">Home</option>
+                          <option value="Home & Garden">Home & Garden</option>
                           <option value="Sports">Sports</option>
                           <option value="Beauty">Beauty</option>
                         </select>
@@ -629,9 +670,12 @@ const Dashboard = () => {
                           className="w-full px-3 py-2 border rounded-md"
                         >
                           <option value="">Select location</option>
-                          <option value="Urban">Urban</option>
-                          <option value="Suburban">Suburban</option>
-                          <option value="Rural">Rural</option>
+                          <option value="New York">New York</option>
+                          <option value="California">California</option>
+                          <option value="Texas">Texas</option>
+                          <option value="Florida">Florida</option>
+                          <option value="Washington">Washington</option>
+                          <option value="Other">Other</option>
                         </select>
                       </div>
 
@@ -653,45 +697,9 @@ const Dashboard = () => {
                           <option value="Bank Transfer">Bank Transfer</option>
                         </select>
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-medium mb-1">
-                          Shipping Method
-                        </label>
-                        <select
-                          name="shippingMethod"
-                          value={quickPrediction.shippingMethod}
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 border rounded-md"
-                        >
-                          <option value="Standard">Standard</option>
-                          <option value="Express">Express</option>
-                          <option value="Next-Day">Next-Day</option>
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-2">
-                        <label className="block text-sm font-medium mb-1">
-                          Discount Applied (%)
-                        </label>
-                        <input
-                          type="number"
-                          name="discountApplied"
-                          value={quickPrediction.discountApplied}
-                          onChange={handleInputChange}
-                          min="0"
-                          max="100"
-                          className="w-full px-3 py-2 border rounded-md"
-                          placeholder="0"
-                        />
-                      </div>
                     </div>
 
-                    <Button
-                      type="submit"
-                      disabled={loading}
-                      className="w-full"
-                    >
+                    <Button type="submit" disabled={loading} className="w-full">
                       {loading ? "Predicting..." : "Get Prediction"}
                     </Button>
                   </form>

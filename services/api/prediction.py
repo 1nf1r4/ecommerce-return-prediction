@@ -1,9 +1,9 @@
 """
 Prediction API Endpoints
-Purpose: Handle HTTP requests for return predictions
+Purpose: Handle HTTP requests for return predictions with user authentication support
 """
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, BackgroundTasks, Header, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Optional, Any
@@ -24,6 +24,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.model_inference import get_inference_agent, ModelInferenceAgent
 from agents.feature_engineering import get_feature_engineering_agent, FeatureEngineeringAgent
 from agents.order_processing import get_order_processing_agent, OrderProcessingAgent
+from utils.supabase_service import get_supabase_service, SupabaseService
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ class FileUploadResponse(BaseModel):
 # Global storage for batch jobs (in production, use Redis or database)
 batch_jobs: Dict[str, Dict[str, Any]] = {}
 
-# Dependencies to get agents
+# Dependencies to get agents and services
 def get_agent() -> ModelInferenceAgent:
     """Dependency to provide inference agent"""
     return get_inference_agent()
@@ -135,6 +136,51 @@ def get_feature_agent() -> FeatureEngineeringAgent:
 def get_order_agent() -> OrderProcessingAgent:
     """Dependency to provide order processing agent"""
     return get_order_processing_agent()
+
+def get_db_service() -> SupabaseService:
+    """Dependency to provide Supabase service"""
+    return get_supabase_service()
+
+async def get_current_user(
+    authorization: Optional[str] = Header(None),
+    db_service: SupabaseService = Depends(get_db_service)
+) -> Optional[Dict[str, Any]]:
+    """
+    Get current authenticated user from Authorization header
+    
+    Args:
+        authorization: Authorization header with Bearer token
+        db_service: Supabase service instance
+        
+    Returns:
+        User data if authenticated, None otherwise
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+        
+    try:
+        token = authorization.split("Bearer ")[1]
+        user = db_service.authenticate_user(token)
+        return user
+    except Exception as e:
+        logger.warning(f"Authentication failed: {str(e)}")
+        return None
+
+async def get_request_metadata(request: Request) -> Dict[str, Any]:
+    """
+    Extract request metadata for logging
+    
+    Args:
+        request: FastAPI request object
+        
+    Returns:
+        Request metadata
+    """
+    return {
+        'ip_address': request.client.host if request.client else None,
+        'user_agent': request.headers.get('user-agent'),
+        'request_size_bytes': len(await request.body()) if hasattr(request, 'body') else None
+    }
 
 def validate_csv_file(file_content: bytes) -> tuple[bool, str, Optional[pd.DataFrame]]:
     """
@@ -165,15 +211,28 @@ def validate_csv_file(file_content: bytes) -> tuple[bool, str, Optional[pd.DataF
         if missing_columns:
             return False, f"Missing required columns: {', '.join(missing_columns)}", None
             
-        # Basic data validation
+        # Basic data validation with better type checking
+        # Clean and convert price column
+        df['price'] = pd.to_numeric(df['price'], errors='coerce')
         if df['price'].isnull().any() or (df['price'] <= 0).any():
             return False, "Price column contains invalid values (must be positive numbers)", None
             
+        # Clean and convert quantity column  
+        df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
         if df['quantity'].isnull().any() or (df['quantity'] <= 0).any():
             return False, "Quantity column contains invalid values (must be positive integers)", None
             
+        # Clean and convert age column
+        df['age'] = pd.to_numeric(df['age'], errors='coerce')
         if df['age'].isnull().any() or (df['age'] < 0).any() or (df['age'] > 120).any():
             return False, "Age column contains invalid values (must be between 0-120)", None
+            
+        # Clean string columns
+        string_columns = ['product_category', 'gender', 'payment_method', 'location']
+        for col in string_columns:
+            df[col] = df[col].astype(str).str.strip()
+            if df[col].isnull().any() or (df[col] == '').any() or (df[col] == 'nan').any():
+                return False, f"{col} column contains empty or invalid values", None
             
         return True, "File validation successful", df
         
@@ -219,15 +278,28 @@ def validate_csv_data(df: pd.DataFrame) -> tuple[bool, str, Optional[pd.DataFram
     if missing_columns:
         return False, f"Missing required columns: {', '.join(missing_columns)}", None
         
-    # Basic data validation
+    # Basic data validation with better type checking
+    # Clean and convert price column
+    df['price'] = pd.to_numeric(df['price'], errors='coerce')
     if df['price'].isnull().any() or (df['price'] <= 0).any():
         return False, "Price column contains invalid values (must be positive numbers)", None
         
+    # Clean and convert quantity column  
+    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
     if df['quantity'].isnull().any() or (df['quantity'] <= 0).any():
         return False, "Quantity column contains invalid values (must be positive integers)", None
         
+    # Clean and convert age column
+    df['age'] = pd.to_numeric(df['age'], errors='coerce')
     if df['age'].isnull().any() or (df['age'] < 0).any() or (df['age'] > 120).any():
         return False, "Age column contains invalid values (must be between 0-120)", None
+        
+    # Clean string columns
+    string_columns = ['product_category', 'gender', 'payment_method', 'location']
+    for col in string_columns:
+        df[col] = df[col].astype(str).str.strip()
+        if df[col].isnull().any() or (df[col] == '').any() or (df[col] == 'nan').any():
+            return False, f"{col} column contains empty or invalid values", None
         
     return True, "File validation successful", df
 
@@ -241,6 +313,14 @@ async def process_batch_predictions(job_id: str, df: pd.DataFrame, agent: ModelI
         agent: Model inference agent
     """
     try:
+        # Import the required agents for batch processing
+        from agents.feature_engineering import FeatureEngineeringAgent
+        from agents.order_processing import OrderProcessingAgent
+        
+        # Initialize agents
+        feature_agent = FeatureEngineeringAgent()
+        order_agent = OrderProcessingAgent()
+        
         # Update job status
         batch_jobs[job_id]["status"] = "processing"
         batch_jobs[job_id]["started_at"] = datetime.now().isoformat()
@@ -251,19 +331,35 @@ async def process_batch_predictions(job_id: str, df: pd.DataFrame, agent: ModelI
         
         for index, row in df.iterrows():
             try:
-                # Create prediction request
+                # Create prediction request with proper type handling
+                # Convert pandas/numpy types to native Python types
                 request_data = {
-                    "price": float(row['price']),
-                    "quantity": int(row['quantity']),
-                    "product_category": str(row['product_category']),
-                    "gender": str(row['gender']),
-                    "payment_method": str(row['payment_method']),
-                    "age": int(row['age']),
-                    "location": str(row['location'])
+                    "price": float(pd.to_numeric(row['price'], errors='coerce')),
+                    "quantity": int(pd.to_numeric(row['quantity'], errors='coerce')),
+                    "product_category": str(row['product_category']).strip(),
+                    "gender": str(row['gender']).strip(),
+                    "payment_method": str(row['payment_method']).strip(),
+                    "age": int(pd.to_numeric(row['age'], errors='coerce')),
+                    "location": str(row['location']).strip()
                 }
                 
-                # Get prediction
-                result = agent.predict_single(request_data)
+                # Validate that numeric conversions succeeded
+                if pd.isna(request_data["price"]) or pd.isna(request_data["quantity"]) or pd.isna(request_data["age"]):
+                    raise ValueError(f"Invalid numeric data in row {index + 1}: price={row['price']}, quantity={row['quantity']}, age={row['age']}")
+                
+                # Follow the same pipeline as single prediction
+                # Step 1: Use order processing agent to create basic features
+                processed_result = order_agent.process_single_order(request_data)
+                
+                if not processed_result['success']:
+                    raise ValueError(f"Order processing failed: {processed_result.get('error', 'Unknown error')}")
+                
+                # Step 2: Use feature engineering agent to create advanced features
+                basic_features_df = processed_result['prediction_ready_data']
+                final_data = feature_agent.transform(basic_features_df)
+                
+                # Step 3: Make prediction with fully engineered features
+                result = agent.predict_single(final_data)
                 
                 if result["success"]:
                     predictions.append({
@@ -293,10 +389,24 @@ async def process_batch_predictions(job_id: str, df: pd.DataFrame, agent: ModelI
                     
             except Exception as e:
                 failed_count += 1
+                # Create safe input data for error reporting
+                try:
+                    input_data_for_error = {
+                        "price": str(row['price']),
+                        "quantity": str(row['quantity']),
+                        "product_category": str(row['product_category']),
+                        "gender": str(row['gender']),
+                        "payment_method": str(row['payment_method']),
+                        "age": str(row['age']),
+                        "location": str(row['location'])
+                    }
+                except:
+                    input_data_for_error = {"error": "Could not extract row data"}
+                
                 predictions.append({
                     "row_index": index + 1,
-                    "input_data": row.to_dict(),
-                    "error": str(e),
+                    "input_data": input_data_for_error,
+                    "error": f"Data conversion error: {str(e)}",
                     "success": False
                 })
                 batch_jobs[job_id]["failed_records"] = failed_count
@@ -329,14 +439,20 @@ async def process_batch_predictions(job_id: str, df: pd.DataFrame, agent: ModelI
 @router.post("/single", response_model=PredictionResponse)
 async def predict_single(
     prediction_request: PredictionRequest,
+    request: Request,
     agent: ModelInferenceAgent = Depends(get_agent),
     feature_agent: FeatureEngineeringAgent = Depends(get_feature_agent),
-    order_agent: OrderProcessingAgent = Depends(get_order_agent)
+    order_agent: OrderProcessingAgent = Depends(get_order_agent),
+    db_service: SupabaseService = Depends(get_db_service),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
 ) -> PredictionResponse:
-    """Make a single prediction"""
+    """Make a single prediction with optional user authentication"""
+    start_time = datetime.now()
+    user_id = current_user['id'] if current_user else None
+    
     try:
         # Convert request to DataFrame format expected by the model
-        data = prediction_request.dict()
+        data = prediction_request.model_dump()
         
         # Step 1: Use order processing agent to create basic features
         processed_result = order_agent.process_single_order(data)
@@ -360,6 +476,33 @@ async def predict_single(
                 error=prediction_result.get('error', 'Prediction failed')
             )
         
+        # Calculate processing time
+        processing_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # Store prediction in database if Supabase is enabled
+        if db_service.is_enabled() and prediction_result.get('prediction'):
+            # Merge input data with prediction results for storage
+            prediction_data = prediction_result['prediction'].copy()
+            prediction_data.update(data)  # Include all input data
+            prediction_data['processing_time_ms'] = processing_time_ms
+            
+            stored_result = await db_service.store_prediction(prediction_data, user_id)
+            if stored_result:
+                logger.info(f"Prediction stored to database with ID: {stored_result.get('id')}")
+            else:
+                logger.warning("Failed to store prediction to database")
+        
+        # Log API usage
+        if db_service.is_enabled():
+            request_metadata = await get_request_metadata(request)
+            await db_service.log_api_usage(
+                user_id=user_id,
+                endpoint="/predict/single",
+                processing_time_ms=processing_time_ms,
+                success=True,
+                request_metadata=request_metadata
+            )
+        
         return PredictionResponse(
             success=True,
             prediction=prediction_result['prediction'],
@@ -367,8 +510,23 @@ async def predict_single(
             feature_importance=prediction_result.get('feature_importance'),
             metadata=prediction_result.get('metadata')
         )
+        
     except Exception as e:
+        processing_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         logger.error(f"Single prediction error: {e}")
+        
+        # Log failed API usage
+        if db_service.is_enabled():
+            request_metadata = await get_request_metadata(request)
+            await db_service.log_api_usage(
+                user_id=user_id,
+                endpoint="/predict/single",
+                processing_time_ms=processing_time_ms,
+                success=False,
+                error_message=str(e),
+                request_metadata=request_metadata
+            )
+        
         return PredictionResponse(
             success=False,
             error=f"Prediction failed: {str(e)}"
@@ -664,14 +822,14 @@ async def download_batch_results(job_id: str, format: str = "csv"):
             row.update({
                 "return_probability": result["prediction"]["return_probability"],
                 "risk_level": result["prediction"]["risk_level"],
-                "confidence": result["prediction"]["confidence"],
+                "confidence_score": result["prediction"]["confidence_score"],
                 "prediction_status": "Success"
             })
         else:
             row.update({
                 "return_probability": None,
                 "risk_level": None,
-                "confidence": None,
+                "confidence_score": None,
                 "prediction_status": "Failed",
                 "error": result.get("error", "Unknown error")
             })

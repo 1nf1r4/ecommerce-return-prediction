@@ -1,20 +1,44 @@
 /**
  * API Service for E-commerce Return Prediction
- * Handles all communication with the FastAPI backend
+ * Handles all communication with the FastAPI backend and Supabase authentication
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+import { client } from "../../supabase/client";
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? "/api" : "http://localhost:8000");
 
 class ApiService {
   constructor() {
     this.baseUrl = API_BASE_URL;
   }
 
+  async getAuthHeaders() {
+    try {
+      const {
+        data: { session },
+      } = await client.auth.getSession();
+      if (session?.access_token) {
+        return {
+          Authorization: `Bearer ${session.access_token}`,
+        };
+      }
+      return {};
+    } catch (error) {
+      console.warn("Failed to get auth headers:", error);
+      return {};
+    }
+  }
+
   async makeRequest(endpoint, options = {}) {
     const url = `${this.baseUrl}${endpoint}`;
+    const authHeaders = await this.getAuthHeaders();
+
     const config = {
       headers: {
         "Content-Type": "application/json",
+        ...authHeaders,
         ...options.headers,
       },
       ...options,
@@ -51,12 +75,9 @@ class ApiService {
     });
   }
 
-  // Order Processing
+  // Order Processing (maps to prediction for backward compatibility)
   async processOrder(orderData) {
-    return this.makeRequest("/orders/process", {
-      method: "POST",
-      body: JSON.stringify(orderData),
-    });
+    return this.makeSinglePrediction(orderData);
   }
 
   // Batch Processing
@@ -71,10 +92,14 @@ class ApiService {
   async uploadBatchFile(file) {
     const formData = new FormData();
     formData.append("file", file);
+    const authHeaders = await this.getAuthHeaders();
 
     return this.makeRequest("/predict/batch/upload", {
       method: "POST",
-      headers: {}, // Let browser set content-type for FormData
+      headers: {
+        ...authHeaders,
+        // Don't set Content-Type for FormData, let browser set it
+      },
       body: formData,
     });
   }
@@ -91,10 +116,13 @@ class ApiService {
 
   // Download Batch Results
   async downloadBatchResults(jobId, format = "csv") {
+    const authHeaders = await this.getAuthHeaders();
     const url = `${this.baseUrl}/predict/batch/${jobId}/download?format=${format}`;
 
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: authHeaders,
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -146,9 +174,6 @@ class ApiService {
       payment_method: formData.paymentMethod,
       age: parseInt(formData.userAge),
       location: formData.userLocation,
-      discount_applied: parseFloat(formData.discountApplied) || 0,
-      shipping_method: formData.shippingMethod || "Standard",
-      order_date: new Date().toISOString().split("T")[0], // Current date
     };
   }
 
@@ -162,7 +187,53 @@ class ApiService {
     }
   }
 
-  // Analytics endpoints
+  // User Analytics endpoints (authenticated)
+  async getDashboardSummary(days = 30) {
+    return await this.makeRequest(`/analytics/dashboard?days=${days}`);
+  }
+
+  async getPredictionHistory(page = 1, pageSize = 25, filters = {}) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      page_size: pageSize.toString(),
+      ...filters,
+    }).toString();
+
+    return await this.makeRequest(`/analytics/predictions?${params}`);
+  }
+
+  async getUserAnalytics(days = 30) {
+    return await this.makeRequest(`/analytics/user-analytics?days=${days}`);
+  }
+
+  async getBatchJobs(status = null, limit = 20) {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      ...(status && { status }),
+    }).toString();
+
+    return await this.makeRequest(`/analytics/batch-jobs?${params}`);
+  }
+
+  async updateUserPreferences(preferences) {
+    return await this.makeRequest("/analytics/preferences", {
+      method: "PUT",
+      body: JSON.stringify(preferences),
+    });
+  }
+
+  async getUserProfile() {
+    return await this.makeRequest("/analytics/profile");
+  }
+
+  async updateUserProfile(profileData) {
+    return await this.makeRequest("/analytics/profile", {
+      method: "PUT",
+      body: JSON.stringify(profileData),
+    });
+  }
+
+  // Legacy analytics endpoints (for backward compatibility)
   async getDashboardData() {
     return await this.makeRequest("/api/analytics/dashboard");
   }
@@ -209,7 +280,9 @@ class ApiService {
   }
 
   async getRecentPredictions(limit = 10) {
-    return await this.makeRequest(`/api/analytics/recent-predictions?limit=${limit}`);
+    return await this.makeRequest(
+      `/api/analytics/recent-predictions?limit=${limit}`
+    );
   }
 
   // Export functionality
@@ -218,15 +291,18 @@ class ApiService {
       format,
       ...filters,
     }).toString();
-    
+
+    const authHeaders = await this.getAuthHeaders();
     const url = `${this.baseUrl}/api/export/predictions?${queryParams}`;
-    
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, {
+        headers: authHeaders,
+      });
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const blob = await response.blob();
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -236,7 +312,7 @@ class ApiService {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(downloadUrl);
-      
+
       return true;
     } catch (error) {
       console.error("Export failed:", error);
