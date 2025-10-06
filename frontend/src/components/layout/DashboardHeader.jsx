@@ -1,10 +1,10 @@
-import { Link, useNavigate, useLocation } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
+import NotificationPanel from '../dashboard/NotificationPanel'
 
 const DashboardHeader = () => {
   const navigate = useNavigate()
-  const location = useLocation()
   const { user, signOut } = useAuth()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
@@ -14,11 +14,11 @@ const DashboardHeader = () => {
     setIsMobileMenuOpen(false)
   }
 
-  const isActive = (path) => {
-    return location.pathname === path 
-      ? 'flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 font-semibold transition-all duration-300 shadow-md transform hover:scale-105' 
-      : 'flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-white/50 hover:text-slate-800 font-medium transition-all duration-300 hover:shadow-sm transform hover:-translate-y-0.5'
-  }
+  // const isActive = (path) => {
+  //   return location.pathname === path 
+  //     ? 'flex items-center gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 font-semibold transition-all duration-300 shadow-md transform hover:scale-105' 
+  //     : 'flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 hover:bg-white/50 hover:text-slate-800 font-medium transition-all duration-300 hover:shadow-sm transform hover:-translate-y-0.5'
+  // }
 
   const toggleMobileMenu = () => {
     setIsMobileMenuOpen(!isMobileMenuOpen)
@@ -40,7 +40,7 @@ const DashboardHeader = () => {
             <span className="hidden sm:block text-2xl">ReturnPredict</span>
           </Link>
 
-          {/* Desktop Navigation */}
+          {/* Desktop Navigation
           <nav className="hidden md:flex items-center space-x-2">
             <Link to="/dashboard" className={isActive('/dashboard')}>
               <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -72,10 +72,13 @@ const DashboardHeader = () => {
               </svg>
               <span>Reports</span>
             </Link>
-          </nav>
+          </nav> */}
 
           {/* User Menu */}
-          <div className="relative flex items-center">
+          <div className="relative flex items-center gap-4">
+            {/* Notification Bell */}
+            <NotificationPanel userId={user?.id} />
+            
             <button 
               onClick={toggleMobileMenu}
               className="w-11 h-11 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold hover:shadow-xl transition-all duration-300 transform hover:scale-105 ring-2 ring-white/20"

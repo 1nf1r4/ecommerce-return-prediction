@@ -24,7 +24,11 @@ frontend/.vscode/*
 *.sln
 *.sw?
 
-*package-lock.json
+# Keep package-lock.json for reproducible builds
+# *package-lock.json
+venv/
+.venv/*
+services/.venv
 
 # Python
 __pycache__/
@@ -38,7 +42,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -50,3 +53,16 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+services/.env.local
+frontend/.env.local
+
+# Vercel deployment configuration
+.vercel
+frontend/.vercel

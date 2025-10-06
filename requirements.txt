@@ -1,0 +1,20 @@
+# Core FastAPI and Web Framework  
+fastapi
+uvicorn[standard]
+python-multipart
+
+# Data Science and ML
+pandas
+numpy
+scikit-learn
+
+# Data Validation
+pydantic
+
+# Database
+supabase
+python-dotenv
+
+# Additional dependencies for production
+gunicorn
+mangum

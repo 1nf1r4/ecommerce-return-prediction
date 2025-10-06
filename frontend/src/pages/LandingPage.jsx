@@ -53,48 +53,88 @@ const LandingPage = () => {
   ]
 
   const stats = [
-    { number: "95%", label: "Prediction Accuracy" },
+    { number: "72%", label: "Prediction Accuracy" },
     { number: "30%", label: "Reduction in Returns" },
     { number: "500K+", label: "Orders Analyzed" },
     { number: "24/7", label: "System Uptime" }
   ]
 
   return (
-    <div className={`transition-all duration-700 ease-out ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-5'}`}>
+    <div className={`transition-all duration-1000 ease-out ${isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
       {/* Hero Section */}
-      <section className="min-h-screen flex items-center bg-gradient-to-br from-indigo-500 via-purple-600 to-pink-500 relative overflow-hidden text-white">
-        <div className="max-w-7xl w-full mx-auto px-8 py-16 relative z-10">
+      <section className="min-h-screen flex items-center relative overflow-hidden">
+        {/* Animated Background */}
+        <div className="absolute inset-0 bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50"></div>
+        <div className="absolute inset-0 opacity-30">
+          <div className="absolute top-20 left-10 w-72 h-72 bg-purple-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse-glow"></div>
+          <div className="absolute top-40 right-10 w-72 h-72 bg-blue-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse-glow animation-delay-2000"></div>
+          <div className="absolute bottom-20 left-1/2 w-72 h-72 bg-pink-300 rounded-full mix-blend-multiply filter blur-xl animate-pulse-glow animation-delay-4000"></div>
+        </div>
+        
+        <div className="max-w-7xl w-full mx-auto px-6 sm:px-8 lg:px-12 py-20 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
-            <div className="space-y-8">
-              <h1 className="text-5xl lg:text-6xl font-bold leading-tight">
-                Predict Returns.
-                <span className="bg-gradient-to-r from-yellow-300 to-pink-300 bg-clip-text text-transparent"> Save Revenue.</span>
+            {/* Left Content */}
+            <div className="space-y-10 animate-fade-in">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 backdrop-blur-sm shadow-lg border border-purple-100">
+                <span className="relative flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-purple-500"></span>
+                </span>
+                <span className="text-sm font-semibold text-gray-700">AI-Powered Platform</span>
+              </div>
+              
+              <h1 className="text-6xl lg:text-7xl font-extrabold leading-tight">
+                <span className="bg-gradient-to-r from-gray-900 via-gray-800 to-gray-900 bg-clip-text text-transparent">
+                  Predict Returns.
+                </span>
+                <br/>
+                <span className="gradient-text text-shadow">Save Revenue.</span>
               </h1>
-              <p className="text-xl text-gray-100 leading-relaxed max-w-2xl">
+              
+              <p className="text-xl text-gray-600 leading-relaxed max-w-xl">
                 Transform your e-commerce business with AI-powered return prediction. 
                 Reduce return rates, optimize inventory, and boost customer satisfaction 
-                with our advanced machine learning platform.
+                with our <span className="font-semibold text-purple-600">advanced machine learning platform</span>.
               </p>
+              
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link to="/signup" className="inline-flex items-center justify-center px-8 py-4 bg-white text-purple-600 font-semibold rounded-xl hover:bg-gray-100 transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl group">
+                <Link to="/signup" className="group inline-flex items-center justify-center px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold rounded-2xl hover:from-blue-700 hover:to-purple-700 transition-all duration-300 transform hover:scale-105 shadow-xl hover-glow">
                   Start Free Trial
-                  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" className="ml-2 group-hover:translate-x-1 transition-transform duration-200">
-                    <line x1="5" y1="12" x2="19" y2="12"/>
-                    <polyline points="12,5 19,12 12,19"/>
+                  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" className="ml-2 group-hover:translate-x-1 transition-transform duration-300">
+                    <line x1="5" y1="12" x2="19" y2="12" strokeWidth={2}/>
+                    <polyline points="12,5 19,12 12,19" strokeWidth={2}/>
                   </svg>
                 </Link>
-                <Link to="/signin" className="inline-flex items-center justify-center px-8 py-4 border-2 border-white/30 text-white font-semibold rounded-xl hover:bg-white/10 transition-all duration-200 transform hover:scale-105">
+                <Link to="/signin" className="inline-flex items-center justify-center px-8 py-4 bg-white border-2 border-gray-200 text-gray-700 font-bold rounded-2xl hover:border-gray-300 hover:shadow-lg transition-all duration-300 transform hover:scale-105">
                   Sign In
                 </Link>
               </div>
+              
+              {/* Trust Indicators */}
+              <div className="flex items-center gap-8 mt-8 text-gray-600">
+                <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm font-medium">No credit card required</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span className="text-sm font-medium">14-day free trial</span>
+                </div>
+              </div>
             </div>
-            <div className="relative">
-              <div className="bg-white/95 backdrop-blur-lg rounded-2xl p-8 border border-white/40 shadow-2xl transform hover:scale-[1.02] transition-transform duration-300">
-                <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-200">
+            
+            {/* Right Content - Dashboard Preview */}
+            <div className="relative hidden lg:block">
+              <div className="glass-card rounded-3xl p-8 shadow-2xl transform hover:scale-[1.02] transition-all duration-500 border-2 border-white/20">
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-200/50">
                   <div className="flex gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-red-400 shadow-sm"></div>
+                    <div className="w-3 h-3 rounded-full bg-yellow-400 shadow-sm"></div>
+                    <div className="w-3 h-3 rounded-full bg-green-400 shadow-sm"></div>
                   </div>
                   <div className="text-gray-800 font-bold text-lg">ReturnPredict Dashboard</div>
                 </div>

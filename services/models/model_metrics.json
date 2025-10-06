@@ -1,0 +1,41 @@
+{
+  "model_type": "Random Forest",
+  "accuracy": 0.7275,
+  "auc_roc": 0.7352025202520253,
+  "cv_accuracy_mean": 0.7183749999999999,
+  "cv_accuracy_std": 0.004585984081961031,
+  "test_samples": 2000,
+  "train_samples": 8000,
+  "n_features": 18,
+  "features": [
+    "Product_Category",
+    "Product_Price",
+    "Order_Quantity",
+    "User_Age",
+    "User_Gender",
+    "Payment_Method",
+    "Shipping_Method",
+    "Discount_Applied",
+    "Total_Order_Value",
+    "Order_Year",
+    "Order_Month",
+    "Order_Weekday",
+    "User_Location_Num",
+    "Return_Risk_Score",
+    "Price_Per_Item",
+    "High_Discount",
+    "Young",
+    "High_Value"
+  ],
+  "target_achieved": false,
+  "timestamp": "2025-10-02T21:47:09.649488",
+  "approach": "Binned Days_to_Return into 3 risk categories to reduce overfitting",
+  "hyperparameters": {
+    "n_estimators": 100,
+    "max_depth": 8,
+    "min_samples_split": 25,
+    "min_samples_leaf": 12,
+    "max_features": "sqrt",
+    "class_weight": "balanced"
+  }
+}

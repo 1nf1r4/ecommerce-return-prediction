@@ -1,0 +1,27 @@
+{
+  "name": "ecommerce-return-prediction-frontend",
+  "version": "1.0.0",
+  "description": "E-commerce Return Prediction Frontend Application",
+  "private": true,
+  "scripts": {
+    "build": "echo 'Building frontend...' && cd frontend && npm ci && npm run build",
+    "dev": "cd frontend && npm run dev",
+    "preview": "cd frontend && npm run preview"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Zayan-Mohamed/ecommerce-return-prediction.git"
+  },
+  "keywords": [
+    "react",
+    "vite",
+    "frontend",
+    "ecommerce"
+  ],
+  "author": "Zayan Mohamed",
+  "license": "MIT"
+}

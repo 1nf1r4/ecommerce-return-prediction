@@ -1,0 +1,72 @@
+name: Sync from Upstream (Alternative)
+
+# This workflow should be placed in your PERSONAL FORK
+# It pulls changes from the organization repo instead of pushing
+
+on:
+    schedule:
+        - cron: "0 */6 * * *" # Every 6 hours
+    workflow_dispatch: # Manual trigger
+    repository_dispatch:
+        types: [sync-upstream]
+
+jobs:
+    sync-upstream:
+        name: Sync from Organization Repo
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout personal fork
+              uses: actions/checkout@v4
+              with:
+                  token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+                  fetch-depth: 0
+
+            - name: Configure Git
+              run: |
+                  git config --global user.name "GitHub Action"
+                  git config --global user.email "action@github.com"
+
+            - name: Add upstream remote
+              run: |
+                  git remote add upstream https://github.com/1nf1r4/ecommerce-return-prediction.git
+
+            - name: Fetch upstream changes
+              run: |
+                  git fetch upstream
+
+            - name: Check for changes
+              id: changes
+              run: |
+                  if git diff --quiet HEAD upstream/main; then
+                    echo "No changes detected"
+                    echo "has_changes=false" >> $GITHUB_OUTPUT
+                  else
+                    echo "Changes detected"
+                    echo "has_changes=true" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Merge upstream changes
+              if: steps.changes.outputs.has_changes == 'true'
+              run: |
+                  git checkout main
+                  git merge upstream/main --no-edit
+
+            - name: Run tests before deployment
+              if: steps.changes.outputs.has_changes == 'true'
+              run: |
+                  # Quick build test
+                  cd frontend && npm ci && npm run build
+                  echo "Tests passed"
+
+            - name: Push changes
+              if: steps.changes.outputs.has_changes == 'true'
+              run: |
+                  git push origin main
+
+            - name: Trigger deployment
+              if: steps.changes.outputs.has_changes == 'true'
+              uses: peter-evans/repository-dispatch@v2
+              with:
+                  token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+                  event-type: deploy-production

@@ -1,0 +1,12 @@
+{
+  "deploy": {
+    "startCommand": "python startup.py",
+    "healthcheckPath": "/health",
+    "restartPolicyType": "on_failure",
+    "restartPolicyMaxRetries": 3
+  },
+  "build": {
+    "builder": "dockerfile",
+    "dockerfilePath": "../Dockerfile"
+  }
+}

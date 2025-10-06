@@ -17,6 +17,7 @@ import AuthCallback from "./pages/AuthCallback";
 
 // Protected Pages
 import Dashboard from "./pages/Dashboard";
+import Settings from "./pages/Settings";
 
 import LandingPage from "./pages/LandingPage";
 
@@ -53,6 +54,14 @@ function AppContent() {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
                 </ProtectedRoute>
               }
             />

@@ -2,6 +2,8 @@
 
 A comprehensive web application that uses machine learning to predict e-commerce return probabilities, helping businesses reduce return costs and improve customer satisfaction.
 
+🚀 **Status**: Automated CI/CD Pipeline Active - Deploys to Vercel (Frontend) + Railway (Backend)
+
 ## 🚀 Features
 
 - **AI-Powered Predictions**: Advanced ML models with 98.5% accuracy

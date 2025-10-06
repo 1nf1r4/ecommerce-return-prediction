@@ -1,0 +1,87 @@
+name: Railway API Deployment
+
+on:
+    workflow_call:
+        inputs:
+            service_id:
+                required: true
+                type: string
+        secrets:
+            RAILWAY_TOKEN:
+                required: true
+            PERSONAL_ACCESS_TOKEN:
+                required: true
+            PERSONAL_GITHUB_USERNAME:
+                required: true
+
+jobs:
+    deploy_via_api:
+        name: Deploy to Railway via REST API
+        runs-on: ubuntu-latest
+        outputs:
+            deployment_status: ${{ steps.deploy_result.outputs.status }}
+            deployment_url: ${{ steps.deploy_result.outputs.url }}
+        steps:
+            - name: Checkout personal fork repository
+              uses: actions/checkout@v4
+              with:
+                  repository: ${{ secrets.PERSONAL_GITHUB_USERNAME }}/ecommerce-return-prediction
+                  token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+            - name: Trigger Railway deployment via API
+              id: deploy_result
+              run: |
+                  echo "Triggering Railway deployment via REST API"
+
+                  # Trigger deployment using Railway's GraphQL API
+                  DEPLOY_RESPONSE=$(curl -X POST \
+                    -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+                    -H "Content-Type: application/json" \
+                    -d '{
+                      "query": "mutation serviceInstanceDeploy($input: ServiceInstanceDeployInput!) { serviceInstanceDeploy(input: $input) { id url } }",
+                      "variables": {
+                        "input": {
+                          "serviceId": "${{ inputs.service_id }}"
+                        }
+                      }
+                    }' \
+                    https://backboard.railway.com/graphql/v2)
+
+                  echo "Railway API Response: $DEPLOY_RESPONSE"
+
+                  # Check if deployment was successful
+                  if echo "$DEPLOY_RESPONSE" | grep -q '"id"'; then
+                    echo "status=success" >> $GITHUB_OUTPUT
+                    echo "url=https://ecommerce-return-prediction-production.up.railway.app" >> $GITHUB_OUTPUT
+                    echo "Railway deployment triggered successfully via API"
+                  else
+                    echo "status=failed" >> $GITHUB_OUTPUT
+                    echo "Railway deployment failed via API"
+                    exit 1
+                  fi
+
+            - name: Wait for deployment to stabilize
+              run: |
+                  echo "Waiting for Railway deployment to complete"
+                  sleep 120
+
+            - name: Verify deployment health
+              run: |
+                  BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+
+                  echo "Testing backend health endpoint"
+                  for attempt in {1..10}; do
+                    if curl -f -s --max-time 10 "$BACKEND_URL/health" > /dev/null; then
+                      echo "Backend health check successful on attempt $attempt"
+                      break
+                    else
+                      echo "Backend health check failed on attempt $attempt, retrying in 15 seconds"
+                      sleep 15
+                    fi
+                    if [ $attempt -eq 10 ]; then
+                      echo "Backend health checks failed after 10 attempts"
+                      exit 1
+                    fi
+                  done
+
+                  echo "Railway deployment completed and verified successfully"

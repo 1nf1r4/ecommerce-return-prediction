@@ -1,0 +1,510 @@
+name: Automated Production Deployment
+
+on:
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: "Force deployment even if tests fail"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: "18"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  pre_deployment_validation:
+    name: Pre-deployment Code Validation
+    runs-on: ubuntu-latest
+    outputs:
+      should_deploy: ${{ steps.validation_result.outputs.should_deploy }}
+      validation_summary: ${{ steps.validation_result.outputs.summary }}
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python environment
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci --silent
+          echo "Frontend dependencies installed successfully"
+
+      - name: Install backend dependencies
+        run: |
+          cd services
+          pip install -r requirements.txt
+          echo "Backend dependencies installed successfully"
+
+      - name: Validate frontend build process
+        run: |
+          cd frontend
+          npm run build
+          if [ -d "dist" ]; then
+            echo "Frontend build completed successfully"
+            echo "Build output directory created with $(ls -1 dist | wc -l) files"
+          else
+            echo "Frontend build failed - no output directory found"
+            exit 1
+          fi
+
+      - name: Validate backend module imports
+        run: |
+          cd services
+          python -c "
+          import sys
+          import traceback
+          sys.path.append('.')
+
+          try:
+              from main import app
+              print('Backend main module imported successfully')
+          except Exception as e:
+              print(f'Backend main module import failed: {e}')
+              traceback.print_exc()
+              sys.exit(1)
+              
+          try:
+              from api.prediction import router as prediction_router
+              print('Prediction API module imported successfully')
+          except Exception as e:
+              print(f'Prediction API module import failed: {e}')
+              traceback.print_exc()
+              sys.exit(1)
+          "
+
+      - name: Validate API configuration
+        run: |
+          cd services
+          python -c "
+          import os
+          import sys
+          sys.path.append('.')
+
+          # Check critical environment variables handling
+          from main import cors_origins
+          print(f'CORS origins configuration loaded: {len(cors_origins)} origins')
+
+          # Validate FastAPI app initialization
+          from main import app
+          print(f'FastAPI app initialized with {len(app.routes)} routes')
+          "
+
+      - name: Determine deployment readiness
+        id: validation_result
+        run: |
+          if [[ "${{ github.event.inputs.force_deploy }}" == "true" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "summary=Forced deployment requested - bypassing validation results" >> $GITHUB_OUTPUT
+            echo "Deployment forced by user input"
+          elif [[ "${{ job.status }}" == "success" ]]; then
+            echo "should_deploy=true" >> $GITHUB_OUTPUT
+            echo "summary=All validation checks passed successfully" >> $GITHUB_OUTPUT
+            echo "All validation checks passed - proceeding with deployment"
+          else
+            echo "should_deploy=false" >> $GITHUB_OUTPUT
+            echo "summary=Validation checks failed - deployment blocked" >> $GITHUB_OUTPUT
+            echo "Validation checks failed - deployment will be skipped"
+            exit 1
+          fi
+
+  sync_to_personal_repository:
+    name: Sync Code to Personal Fork
+    needs: pre_deployment_validation
+    if: needs.pre_deployment_validation.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      sync_status: ${{ steps.sync_result.outputs.status }}
+      deployment_tag: ${{ steps.create_tag.outputs.tag_name }}
+    steps:
+      - name: Checkout organization repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git for automated commits
+        run: |
+          git config --global user.name "GitHub Actions Deployment Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add personal fork as remote repository
+        run: |
+          if git remote get-url personal-fork >/dev/null 2>&1; then
+            echo "Personal fork remote already exists, updating URL"
+            git remote set-url personal-fork https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ secrets.PERSONAL_GITHUB_USERNAME }}/ecommerce-return-prediction.git
+          else
+            echo "Adding personal fork remote repository"
+            git remote add personal-fork https://${{ secrets.PERSONAL_ACCESS_TOKEN }}@github.com/${{ secrets.PERSONAL_GITHUB_USERNAME }}/ecommerce-return-prediction.git
+          fi
+          echo "Personal fork remote configured successfully"
+
+      - name: Push changes to personal fork
+        id: sync_result
+        run: |
+          echo "Attempting to push to personal fork"
+          git push personal-fork main --force
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "Code successfully synced to personal fork"
+
+      - name: Create deployment tracking tag
+        id: create_tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          TAG_NAME="deploy-$(date +%Y%m%d-%H%M%S)"
+          git tag $TAG_NAME
+          git push personal-fork $TAG_NAME
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+          echo "Deployment tag created: $TAG_NAME"
+
+  deploy_backend_service:
+    name: Deploy Backend to Railway (API Method)
+    needs: [pre_deployment_validation, sync_to_personal_repository]
+    if: needs.pre_deployment_validation.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_status: ${{ steps.railway_api_deploy.outputs.status }}
+      backend_url: ${{ steps.railway_api_deploy.outputs.url }}
+    steps:
+      - name: Checkout personal fork repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.PERSONAL_GITHUB_USERNAME }}/ecommerce-return-prediction
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Deploy to Railway using REST API (Bypass CLI Issues)
+        id: railway_api_deploy
+        run: |
+          echo "Deploying to Railway using REST API to avoid CLI authentication issues"
+
+          # Method 1: Try GraphQL API deployment trigger
+          echo "Attempting GraphQL API deployment..."
+          GRAPHQL_RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.RAILWAY_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "query": "mutation serviceInstanceDeploy($input: ServiceInstanceDeployInput!) { serviceInstanceDeploy(input: $input) { id url } }",
+              "variables": {
+                "input": {
+                  "serviceId": "${{ secrets.RAILWAY_SERVICE_ID }}"
+                }
+              }
+            }' \
+            https://backboard.railway.com/graphql/v2 || echo "GraphQL failed")
+
+          echo "GraphQL Response: $GRAPHQL_RESPONSE"
+
+          # Method 2: Try webhook trigger (if available)
+          if [[ -n "${{ secrets.RAILWAY_WEBHOOK_URL }}" ]]; then
+            echo "Attempting webhook deployment trigger..."
+            WEBHOOK_RESPONSE=$(curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -d '{"trigger": "github_action"}' \
+              "${{ secrets.RAILWAY_WEBHOOK_URL }}" || echo "Webhook failed")
+            echo "Webhook Response: $WEBHOOK_RESPONSE"
+          fi
+
+          # Method 3: GitHub integration trigger (Railway auto-deploys on push)
+          echo "Railway should auto-deploy from GitHub integration"
+          echo "Repository synced to personal fork - Railway will detect changes"
+
+          # Set success status
+          echo "status=initiated" >> $GITHUB_OUTPUT
+          echo "url=https://ecommerce-return-prediction-production.up.railway.app" >> $GITHUB_OUTPUT
+          echo "Railway deployment triggered successfully (API method)"
+
+      - name: Wait for Railway auto-deployment
+        run: |
+          echo "Waiting for Railway auto-deployment to complete"
+          echo "Railway typically takes 2-3 minutes to build and deploy"
+          sleep 180
+
+      - name: Verify Railway deployment health
+        id: verify_deployment
+        run: |
+          BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+          echo "backend_url=$BACKEND_URL" >> $GITHUB_OUTPUT
+
+          echo "Testing backend health endpoint"
+          for attempt in {1..15}; do
+            if curl -f -s --max-time 10 "$BACKEND_URL/health" > /dev/null; then
+              echo "Backend health check successful on attempt $attempt"
+              curl -s "$BACKEND_URL/health" | grep -q "healthy" && echo "Backend reports healthy status"
+              break
+            else
+              echo "Backend health check failed on attempt $attempt, retrying in 20 seconds"
+              sleep 20
+            fi
+            if [ $attempt -eq 15 ]; then
+              echo "Backend health checks failed after 15 attempts"
+              echo "This might indicate a deployment issue or longer build time"
+              echo "Check Railway dashboard for deployment status"
+              exit 1
+            fi
+          done
+
+      - name: Test backend API endpoints
+        run: |
+          BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+
+          echo "Testing prediction health endpoint"
+          curl -f -s --max-time 10 "$BACKEND_URL/predict/health" > /dev/null || {
+            echo "Prediction health endpoint test failed"
+            exit 1
+          }
+
+          echo "Backend API endpoints responding correctly"
+
+  deploy_frontend_service:
+    name: Deploy Frontend to Vercel
+    needs:
+      [
+        pre_deployment_validation,
+        sync_to_personal_repository,
+        deploy_backend_service,
+      ]
+    if: needs.pre_deployment_validation.outputs.should_deploy == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_status: ${{ steps.vercel_deploy.outputs.status }}
+      frontend_url: ${{ steps.verify_frontend.outputs.frontend_url }}
+    steps:
+      - name: Checkout personal fork repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.PERSONAL_GITHUB_USERNAME }}/ecommerce-return-prediction
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies and build frontend
+        run: |
+          cd frontend
+          npm ci --silent
+          npm run build
+          echo "Frontend build completed successfully"
+
+      - name: Verify frontend deployment
+        id: verify_frontend
+        run: |
+          FRONTEND_URL="https://ecommerce-return-prediction.vercel.app"
+          echo "frontend_url=$FRONTEND_URL" >> $GITHUB_OUTPUT
+
+          echo "Waiting for frontend deployment to stabilize"
+          sleep 45
+
+          echo "Testing frontend accessibility"
+          for attempt in {1..8}; do
+            if curl -f -s --max-time 15 "$FRONTEND_URL/" > /dev/null; then
+              echo "Frontend accessibility verified on attempt $attempt"
+              break
+            else
+              echo "Frontend accessibility check failed on attempt $attempt, retrying in 15 seconds"
+              sleep 15
+            fi
+            if [ $attempt -eq 8 ]; then
+              echo "Frontend accessibility checks failed after 8 attempts"
+              exit 1
+            fi
+          done
+
+  integration_testing:
+    name: End-to-End Integration Testing
+    needs: [deploy_backend_service, deploy_frontend_service]
+    runs-on: ubuntu-latest
+    outputs:
+      integration_status: ${{ steps.integration_results.outputs.status }}
+      test_summary: ${{ steps.integration_results.outputs.summary }}
+    steps:
+      - name: Wait for deployment stabilization
+        run: |
+          echo "Allowing additional time for full deployment stabilization"
+          sleep 90
+
+      - name: Test cross-origin resource sharing configuration
+        run: |
+          BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+          FRONTEND_URL="https://ecommerce-return-prediction-2.vercel.app"
+
+          echo "Testing CORS preflight request from frontend to backend"
+          HTTP_CODE=$(curl -H "Origin: $FRONTEND_URL" \
+                              -H "Access-Control-Request-Method: GET" \
+                              -H "Access-Control-Request-Headers: Content-Type" \
+                              -X OPTIONS \
+                              -s -o /dev/null -w "%{http_code}" \
+                              --max-time 10 \
+                              "$BACKEND_URL/health")
+
+          if [[ "$HTTP_CODE" == "200" ]] || [[ "$HTTP_CODE" == "204" ]]; then
+            echo "CORS configuration verified successfully (HTTP $HTTP_CODE)"
+          else
+            echo "CORS configuration test failed with HTTP code: $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Test API connectivity from frontend perspective
+        run: |
+          BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+          FRONTEND_URL="https://ecommerce-return-prediction.vercel.app"
+
+          echo "Testing API GET request with frontend origin"
+          HTTP_CODE=$(curl -X GET \
+                             -H "Accept: application/json" \
+                             -H "Origin: $FRONTEND_URL" \
+                             -s -o /dev/null -w "%{http_code}" \
+                             --max-time 15 \
+                             "$BACKEND_URL/health")
+
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "API connectivity from frontend verified successfully (HTTP $HTTP_CODE)"
+          else
+            echo "API connectivity test failed with HTTP code: $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Test prediction endpoint functionality
+        run: |
+          BACKEND_URL="https://ecommerce-return-prediction-production.up.railway.app"
+          FRONTEND_URL="https://ecommerce-return-prediction.vercel.app"
+
+          echo "Testing prediction endpoint with sample data"
+          HTTP_CODE=$(curl -X POST \
+                                   -H "Content-Type: application/json" \
+                                   -H "Origin: $FRONTEND_URL" \
+                                   -d '{
+                                     "price": 299.99,
+                                     "quantity": 2,
+                                     "product_category": "Electronics",
+                                     "gender": "Male",
+                                     "payment_method": "Credit Card",
+                                     "age": 32,
+                                     "location": "New York"
+                                   }' \
+                                   -s -o /dev/null -w "%{http_code}" \
+                                   --max-time 20 \
+                                   "$BACKEND_URL/predict/single")
+
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "Prediction endpoint functionality verified successfully (HTTP $HTTP_CODE)"
+          else
+            echo "Prediction endpoint test failed with HTTP code: $HTTP_CODE"
+            exit 1
+          fi
+
+      - name: Compile integration test results
+        id: integration_results
+        run: |
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "summary=All integration tests passed successfully" >> $GITHUB_OUTPUT
+          echo "Integration testing completed successfully"
+
+  deployment_reporting:
+    name: Generate Deployment Report
+    needs:
+      [
+        pre_deployment_validation,
+        sync_to_personal_repository,
+        deploy_backend_service,
+        deploy_frontend_service,
+        integration_testing,
+      ]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate comprehensive deployment summary
+        run: |
+          echo "DEPLOYMENT PIPELINE EXECUTION REPORT"
+          echo "=================================="
+          echo "Execution timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Git commit hash: ${{ github.sha }}"
+          echo "Source branch: ${{ github.ref_name }}"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo ""
+          echo "PIPELINE STAGE RESULTS:"
+          echo "----------------------"
+          echo "Pre-deployment validation: ${{ needs.pre_deployment_validation.result }}"
+          echo "Personal fork synchronization: ${{ needs.sync_to_personal_repository.result }}"
+          echo "Backend service deployment: ${{ needs.deploy_backend_service.result }}"
+          echo "Frontend service deployment: ${{ needs.deploy_frontend_service.result }}"
+          echo "Integration testing: ${{ needs.integration_testing.result }}"
+          echo ""
+
+          if [[ "${{ needs.integration_testing.result }}" == "success" ]]; then
+            echo "DEPLOYMENT STATUS: SUCCESSFUL"
+            echo "=============================="
+            echo "All pipeline stages completed successfully"
+            echo ""
+            echo "LIVE APPLICATION ENDPOINTS:"
+            echo "Frontend application: https://ecommerce-return-prediction.vercel.app/"
+            echo "Backend API service: https://ecommerce-return-prediction-production.up.railway.app/"
+            echo "API health monitoring: https://ecommerce-return-prediction-production.up.railway.app/health"
+            echo "API documentation: https://ecommerce-return-prediction-production.up.railway.app/docs"
+            echo ""
+            echo "The application is now live and fully operational"
+          else
+            echo "DEPLOYMENT STATUS: FAILED"
+            echo "========================="
+            echo "One or more pipeline stages encountered failures"
+            echo "Review individual stage logs for detailed error information"
+            echo "Manual intervention may be required to resolve deployment issues"
+          fi
+
+  failure_notification:
+    name: Handle Deployment Failures
+    needs:
+      [
+        pre_deployment_validation,
+        sync_to_personal_repository,
+        deploy_backend_service,
+        deploy_frontend_service,
+        integration_testing,
+      ]
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate failure analysis report
+        run: |
+          echo "DEPLOYMENT PIPELINE FAILURE ANALYSIS"
+          echo "===================================="
+          echo "Failure timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Git commit hash: ${{ github.sha }}"
+          echo "Source branch: ${{ github.ref_name }}"
+          echo ""
+          echo "FAILED STAGE ANALYSIS:"
+          echo "---------------------"
+          echo "Pre-deployment validation: ${{ needs.pre_deployment_validation.result }}"
+          echo "Personal fork synchronization: ${{ needs.sync_to_personal_repository.result }}"
+          echo "Backend service deployment: ${{ needs.deploy_backend_service.result }}"
+          echo "Frontend service deployment: ${{ needs.deploy_frontend_service.result }}"
+          echo "Integration testing: ${{ needs.integration_testing.result }}"
+          echo ""
+          echo "RECOMMENDED TROUBLESHOOTING STEPS:"
+          echo "1. Review the failed stage logs for specific error messages"
+          echo "2. Verify all required secrets are properly configured"
+          echo "3. Check service health status in Vercel and Railway dashboards"
+          echo "4. Validate environment variable configurations"
+          echo "5. Test deployment process manually if needed"
+          echo ""
+          echo "For immediate assistance, check the GitHub Actions logs"
+          echo "or contact the development team with this failure report"
